@@ -1,27 +1,44 @@
-﻿using System;
+﻿// Precision Repeat Action On Interval Async Method
+// Created by Ryan Scott White (sunsetquest) on 4/21/2020
+// Shared under the MIT License 
+// Goals: 
+//   (1) simple
+//   (2) accurate timer interval
+//   (3) not cpu wasteful (without using SpinWait too much)
+//   (4) The timer will aline itself. 
+//
+// Sources of ideas/code
+//   framework: https://stackoverflow.com/a/22453097/2352507 (Matthew Watson, Mar 17 '14)
+//   yield use: https://stackoverflow.com/a/33407181/2352507 (Ned Stoyanov, Oct 29 '15)
+//   timers without loosing time: https://stackoverflow.com/questions/9228313/most-accurate-timer-in-net (Matt Thomas, Jan 7 '16)
+
+using System;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
-// Source for framework: https://stackoverflow.com/a/22453097/2352507
-// Source for Yield information: https://stackoverflow.com/a/33407181/2352507
-// Matt Thomas's overall message: https://stackoverflow.com/questions/9228313/most-accurate-timer-in-net
-
 class Program
 {
-
     static void Main()
     {
-        CancellationTokenSource cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(1000));
+        CancellationTokenSource cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(60));
         Console.WriteLine("Begin: " + DateTime.Now.ToString("hh.mm.ss.ffffff"));
-        RepeatActionOnIntervalAsync(SayHelloAsync(), TimeSpan.FromMilliseconds(100), cancellation.Token).Wait();
+        PrecisionRepeatActionOnIntervalAsync(SayHello(), TimeSpan.FromMilliseconds(1000), cancellation.Token).Wait();
         Console.WriteLine("Finish: " + DateTime.Now.ToString("hh.mm.ss.ffffff"));
         Console.ReadKey();
     }
 
-    public static Action SayHelloAsync() => () => Console.WriteLine("Fired at " + DateTime.Now.ToString("hh.mm.ss.ffffff"));
+    // Some Function
+    public static Action SayHello() => () => Console.WriteLine(DateTime.Now.ToString("ss.ffff"));
         
-    public static async Task RepeatActionOnIntervalAsync(Action task, TimeSpan interval, CancellationToken? ct = null)
+    /// <summary>
+    /// A timer that will fire an action at a regular interval. The timer will aline itself.
+    /// </summary>
+    /// <param name="action">The action to run Asyncrinasally</param>
+    /// <param name="interval">The interval to fire at.</param>
+    /// <param name="ct">(optional)A CancellationToken to cancel.</param>
+    /// <returns>The Task.</returns>
+    public static async Task PrecisionRepeatActionOnIntervalAsync(Action action, TimeSpan interval, CancellationToken? ct = null)
     {
         long stage1Delay = 20 ;
         long stage2Delay = 5 * TimeSpan.TicksPerMillisecond;
@@ -31,7 +48,7 @@ class Program
         bool warmup = true;
         while (true)
         {
-            // Getting closer to 'target' - Lets do the less precisces but least cpu intesive wait
+            // Getting closer to 'target' - Lets do the less precise but least cpu intensive wait
             var timeLeft = target - DateTime.Now;
             if (timeLeft.TotalMilliseconds >= stage1Delay)
             {
@@ -39,7 +56,7 @@ class Program
                 {
                     await Task.Delay((int)(timeLeft.TotalMilliseconds - stage1Delay), ct ?? CancellationToken.None);
                 }
-                catch (TaskCanceledException)
+                catch (TaskCanceledException) when (ct != null)
                 {
                     return;
                 }
@@ -63,7 +80,7 @@ class Program
                 }
             }
 
-            // Extreamlly close to 'target' - Lets do the most precise but very cpu/battery intesive 
+            // Extreamlly close to 'target' - Lets do the most precise but very cpu/battery intensive 
             while (DateTime.Now < target)
             {
                 Thread.SpinWait(64);
@@ -71,8 +88,8 @@ class Program
 
             if (!warmup)
             {
+                await Task.Run(action); // or your code here
                 target += interval;
-                await Task.Run(task); // or your code here
             }
             else
             {
@@ -84,8 +101,14 @@ class Program
         }
     }
 
-
-    public static async Task RepeatActionOnIntervalAsync_DEBUG(Action task, TimeSpan interval, CancellationToken? ct = null)
+    /// <summary>
+    /// A timer that will fire an action at a regular interval. The timer will aline itself.
+    /// </summary>
+    /// <param name="action">The action to run Asyncrinasally</param>
+    /// <param name="interval">The interval to fire at.</param>
+    /// <param name="ct">(optional)A CancellationToken to cancel.</param>
+    /// <returns>The Task.</returns>
+    public static async Task PrecisionRepeatActionOnIntervalAsync_DEBUG(Action task, TimeSpan interval, CancellationToken? ct = null)
     {
         StringBuilder log = new StringBuilder();
 
@@ -102,7 +125,7 @@ class Program
             if (loops == 100)
                 break;
 
-            // Getting closer to 'target' - Lets do the less precisces but least cpu intesive wait
+            // Getting closer to 'target' - Lets do the less precise but least cpu intensive wait
             bool taskDelayed = false;
             var timeLeft = target - DateTime.Now;
             if (timeLeft.TotalMilliseconds >= stage1Delay)
@@ -112,13 +135,13 @@ class Program
                 {
                     await Task.Delay((int)(timeLeft.TotalMilliseconds - stage1Delay), ct ?? CancellationToken.None);
                 }
-                catch (TaskCanceledException)
+                catch (TaskCanceledException) when (ct != null)
                 {
                     return;
                 }
             }
 
-            // Getting closer to 'target' - Lets do the semi-precise but mild cpu intesive wait - Task.Yield()
+            // Getting closer to 'target' - Lets do the semi-precise but mild cpu intensive wait - Task.Yield()
             int delay0Count = 0;
             while (DateTime.Now < target - new TimeSpan(stage2Delay))
             {
@@ -126,7 +149,7 @@ class Program
                 await Task.Yield();
             }
 
-            // Getting closer to 'target' - Lets do the semi-precise but mild cpu intesive wait - Thread.Sleep(0)
+            // Getting closer to 'target' - Lets do the semi-precise but mild cpu intensive wait - Thread.Sleep(0)
             // Note: Thread.Sleep(0) is removed below because it is sometimes looked down on and also said not good to mix 'Thread.Sleep(0)' with Tasks.
             //       However, Thread.Sleep(0) does have a quicker and more reliable turn around time then Task.Yield() so to 
             //       make up for this a longer (and more expensive) Thread.SpinWait(1) would be needed.
@@ -138,7 +161,7 @@ class Program
                     Thread.Sleep(0);
                 }
 
-            // Extreamlly close to 'target' - Lets do the most precise but very cpu/battery intesive 
+            // Extreamlly close to 'target' - Lets do the most precise but very cpu/battery intensive 
             int spinCount = 0;
             while (DateTime.Now < target)
             {
@@ -155,12 +178,10 @@ class Program
             + " \t" + finish.Subtract(target).ToString(@"s\.ffffff") + "\tTaskDelayed:" + (taskDelayed ? "Y" : "N")
             + "  Counts->\tYield():" + delay0Count + "\tSleep0:" + sleep0Count + "\tSpin:" + spinCount);
 
-
             if (!warmup)
             {
-                target += interval;
-
                 await Task.Run(task); // or your code here
+                target += interval;
             }
             else
             {
@@ -174,7 +195,5 @@ class Program
         Console.WriteLine(log);
         Console.WriteLine("misses: " + misses);
     }
-
-
 }
 
