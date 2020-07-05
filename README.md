@@ -135,6 +135,9 @@ Options: taskDelayDelay = 16; taskYieldDelay = 8; USE_SLEEP0 = true;
 | 39     | 42.000000  |  0.000    | Yes   | 2886  | 6773  | 296  |
 | 40     | 42.250000  |  9.110    | Yes   | 882   | 1     | 0    |
 
+## Chart
+![Chart](/Other/Chart1.png)
+
 
 ## License
 MIT License (MIT)
