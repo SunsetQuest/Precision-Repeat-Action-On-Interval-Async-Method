@@ -21,15 +21,15 @@ class Program
 {
     static void Main()
     {
-        CancellationTokenSource cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(60));
-        Console.WriteLine("Begin: " + DateTime.Now.ToString("hh.mm.ss.ffffff"));
-        PrecisionRepeatActionOnIntervalAsync(SayHello(), TimeSpan.FromMilliseconds(1000), cancellation.Token).Wait();
-        Console.WriteLine("Finish: " + DateTime.Now.ToString("hh.mm.ss.ffffff"));
+        CancellationTokenSource cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(300));
+        Console.WriteLine("Start time is " + DateTime.Now.ToString("hh.mm.ss.ffffff"));
+        PrecisionRepeatActionOnIntervalAsync(SayHello(), TimeSpan.FromMilliseconds(100), cancellation.Token).Wait();
+        Console.WriteLine("Ending Time is " + DateTime.Now.ToString("hh.mm.ss.ffffff"));
         Console.ReadKey();
     }
 
     // Some Function
-    public static Action SayHello() => () => Console.WriteLine(DateTime.Now.ToString("ss.ffff"));
+    public static Action SayHello() => () => Console.WriteLine(DateTime.Now.ToString("ss.ffffff"));
         
     /// <summary>
     /// A timer that will fire an action at a regular interval. The timer will aline itself.
@@ -40,8 +40,8 @@ class Program
     /// <returns>The Task.</returns>
     public static async Task PrecisionRepeatActionOnIntervalAsync(Action action, TimeSpan interval, CancellationToken? ct = null)
     {
-        long stage1Delay = 20 ;
-        long stage2Delay = 5 * TimeSpan.TicksPerMillisecond;
+        long stage1Delay = 16 ;
+        long stage2Delay = 8 * TimeSpan.TicksPerMillisecond;
         bool USE_SLEEP0 = false;
 
         DateTime target = DateTime.Now + new TimeSpan(0, 0, 0, 0, (int)stage1Delay + 2);
@@ -112,40 +112,39 @@ class Program
     {
         StringBuilder log = new StringBuilder();
 
-        long stage1Delay = 20;
-        long stage2Delay = 5 * TimeSpan.TicksPerMillisecond;
-        bool USE_SLEEP0 = false;
+        const long taskDelayDelay = 16;
+        const long taskYieldDelay = 8 * TimeSpan.TicksPerMillisecond;
+        bool USE_SLEEP0 = true;
 
         int loops = 0;
-        DateTime target = DateTime.Now + new TimeSpan(0, 0, 0, 0, (int)stage1Delay + 2);
+        DateTime target = DateTime.Now + new TimeSpan(0, 0, 0, 0, (int)taskDelayDelay + 2);
         bool warmup = true;
         int misses = 0;
         while (true)
         {
-            if (loops == 100)
-                break;
-
             // Getting closer to 'target' - Lets do the less precise but least cpu intensive wait
             bool taskDelayed = false;
             var timeLeft = target - DateTime.Now;
-            if (timeLeft.TotalMilliseconds >= stage1Delay)
+            if (timeLeft.TotalMilliseconds >= taskDelayDelay)
             {
                 taskDelayed = true;
                 try
                 {
-                    await Task.Delay((int)(timeLeft.TotalMilliseconds - stage1Delay), ct ?? CancellationToken.None);
+                    await Task.Delay((int)(timeLeft.TotalMilliseconds - taskDelayDelay), ct ?? CancellationToken.None);
                 }
                 catch (TaskCanceledException) when (ct != null)
                 {
+                    Console.WriteLine(log);
+                    Console.WriteLine("misses: " + misses);
                     return;
                 }
             }
 
             // Getting closer to 'target' - Lets do the semi-precise but mild cpu intensive wait - Task.Yield()
-            int delay0Count = 0;
-            while (DateTime.Now < target - new TimeSpan(stage2Delay))
+            int YieldCount = 0;
+            while (DateTime.Now < target - new TimeSpan(taskYieldDelay))
             {
-                delay0Count++;
+                YieldCount++;
                 await Task.Yield();
             }
 
@@ -155,7 +154,7 @@ class Program
             //       make up for this a longer (and more expensive) Thread.SpinWait(1) would be needed.
             int sleep0Count = 0;
             if (USE_SLEEP0)
-                while (DateTime.Now < target - new TimeSpan(stage2Delay / 8))
+                while (DateTime.Now < target - new TimeSpan(taskYieldDelay / 8))
                 {
                     sleep0Count++;
                     Thread.Sleep(0);
@@ -171,16 +170,15 @@ class Program
 
             DateTime finish = DateTime.Now;
 
-            if (finish.Subtract(target).Ticks > (new TimeSpan(0, 0, 0, 0, 1)).Ticks)
+            if (finish.Subtract(target).Ticks >= (new TimeSpan(0, 0, 0, 0, 1)).Ticks)
                 misses++;
-
-            log.AppendLine((warmup ? "WARMUP " : "") + "loop:" + loops + "\tnext: " + target.ToString("ss.ffffff")
-            + " \t" + finish.Subtract(target).ToString(@"s\.ffffff") + "\tTaskDelayed:" + (taskDelayed ? "Y" : "N")
-            + "  Counts->\tYield():" + delay0Count + "\tSleep0:" + sleep0Count + "\tSpin:" + spinCount);
 
             if (!warmup)
             {
                 await Task.Run(task); // or your code here
+                log.AppendLine("| " + loops + "\t| " + target.ToString("ss.ffffff") + "\t| "
+                    + finish.Subtract(target).ToString(@"s\.fffffff") + (taskDelayed ? "\t| Delayed" : "\t| Skipped")
+                    + "\t| " + YieldCount + "\t| " + sleep0Count + "\t| " + spinCount + "\t|");
                 target += interval;
             }
             else
@@ -189,11 +187,12 @@ class Program
                 long alignVal = start1 - (start1 % ((long)interval.TotalMilliseconds * TimeSpan.TicksPerMillisecond));
                 target = new DateTime(alignVal);
                 warmup = false;
+                log.AppendLine("|     \t| Actual     \t|        \t| Task.\t| Yield\t| Sleep\t| Spin  |");
+                log.AppendLine("|loop#\t| Target Time\t| Late by\t| Yield\t| Count\t| Count\t| Count |");
+                log.AppendLine("|-------|---------------|---------------|-------|-------|-------|-------|");
             }
             loops++;
         }
-        Console.WriteLine(log);
-        Console.WriteLine("misses: " + misses);
     }
 }
 
